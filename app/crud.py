@@ -1,8 +1,18 @@
+from datetime import timezone
+
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Address, Contact
-from app.schemas import AddressCreate, AddressReplace, ContactCreate, ContactReplace, ContactUpdate
+from app.models import Address, Contact, Meetup
+from app.schemas import (
+    AddressCreate,
+    AddressReplace,
+    ContactCreate,
+    ContactReplace,
+    ContactUpdate,
+    MeetupCreate,
+    NearbyCluster,
+)
 
 SORTABLE_FIELDS = ("id", "first_name", "last_name", "email", "company", "created_at", "updated_at")
 
@@ -115,3 +125,57 @@ def replace_address(db: Session, address: Address, payload: AddressReplace) -> A
 def delete_address(db: Session, address: Address) -> None:
     db.delete(address)
     db.commit()
+
+
+def _city_key(city: str) -> str:
+    return city.strip().lower()
+
+
+def list_nearby_clusters(db: Session) -> list[NearbyCluster]:
+    """Cities where at least two distinct contacts have an address, biggest first."""
+    stmt = select(Address.city, Address.contact_id).where(Address.city.is_not(None)).order_by(Address.id)
+    clusters: dict[str, tuple[str, dict[int, None]]] = {}
+    for city, contact_id in db.execute(stmt):
+        key = _city_key(city)
+        if not key:
+            continue
+        # Keep the first-seen spelling; a dict keeps ids distinct and ordered.
+        spelling, ids = clusters.setdefault(key, (city.strip(), {}))
+        ids[contact_id] = None
+    return sorted(
+        (
+            NearbyCluster(city=spelling, contact_ids=list(ids), contact_count=len(ids))
+            for spelling, ids in clusters.values()
+            if len(ids) >= 2
+        ),
+        key=lambda cluster: (-cluster.contact_count, cluster.city),
+    )
+
+
+def get_meetup(db: Session, meetup_id: int) -> Meetup | None:
+    return db.get(Meetup, meetup_id)
+
+
+def create_meetup(db: Session, payload: MeetupCreate) -> Meetup:
+    data = payload.model_dump()
+    data["city"] = data["city"].strip()
+    if data["starts_at"].tzinfo is not None:
+        # SQLite drops the offset on write; store UTC so the value reads back unchanged.
+        data["starts_at"] = data["starts_at"].astimezone(timezone.utc)
+    meetup = Meetup(**data)
+    db.add(meetup)
+    db.commit()
+    db.refresh(meetup)
+    return meetup
+
+
+def meetup_guests(db: Session, meetup: Meetup) -> list[Contact]:
+    """Contacts with at least one address in the meetup's city, each once, by id."""
+    in_city = select(Address.contact_id).where(func.lower(Address.city) == _city_key(meetup.city))
+    stmt = (
+        select(Contact)
+        .where(Contact.id.in_(in_city))
+        .options(selectinload(Contact.addresses))
+        .order_by(Contact.id)
+    )
+    return list(db.execute(stmt).scalars().all())

@@ -101,3 +101,23 @@ class Address(Base):
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<Address id={self.id} contact_id={self.contact_id} type={self.type!r}>"
+
+
+class Meetup(Base):
+    """A gathering in one city. Guests are not stored: they are the contacts
+    with an address in that city, so the list stays right as addresses change."""
+
+    __tablename__ = "meetups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    city: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"<Meetup id={self.id} city={self.city!r}>"
