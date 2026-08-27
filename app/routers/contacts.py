@@ -3,8 +3,11 @@ from sqlalchemy.orm import Session
 
 from app import crud
 from app.database import get_db
-from app.models import Contact
+from app.models import Address, Contact
 from app.schemas import (
+    AddressCreate,
+    AddressRead,
+    AddressReplace,
     ContactCreate,
     ContactPage,
     ContactRead,
@@ -16,6 +19,13 @@ from app.schemas import (
 router = APIRouter(prefix="/api/v1/contacts", tags=["contacts"])
 
 CONTACT_ID = Path(description="Identifier returned when the contact was created.", examples=[1], ge=1)
+ADDRESS_ID = Path(description="Identifier returned when the address was created.", examples=[1], ge=1)
+
+ADDRESS_NOT_FOUND = {
+    "model": ErrorResponse,
+    "description": "No address with that id belongs to this contact.",
+    "content": {"application/json": {"example": {"detail": "Address 7 not found for contact 1"}}},
+}
 
 NOT_FOUND = {
     "model": ErrorResponse,
@@ -34,6 +44,15 @@ def _get_or_404(db: Session, contact_id: int) -> Contact:
     if contact is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Contact {contact_id} not found")
     return contact
+
+
+def _get_address_or_404(db: Session, contact_id: int, address_id: int) -> Address:
+    address = crud.get_address(db, address_id)
+    if address is None or address.contact_id != contact_id:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"Address {address_id} not found for contact {contact_id}"
+        )
+    return address
 
 
 def _reject_duplicate_email(db: Session, email: str, *, exclude_id: int | None = None) -> None:
@@ -187,7 +206,90 @@ def delete_contact(contact_id: int = CONTACT_ID, db: Session = Depends(get_db)) 
     Permanently delete a contact.
 
     Deletion is not idempotent here: a second call for the same id returns `404`.
+    Deleting a contact also deletes all of its addresses.
     """
     contact = _get_or_404(db, contact_id)
     crud.delete_contact(db, contact)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{contact_id}/addresses",
+    response_model=AddressRead,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="createAddress",
+    summary="Add an address to a contact",
+    response_description="The stored address, including its new id.",
+    responses={status.HTTP_404_NOT_FOUND: NOT_FOUND},
+)
+def create_address(
+    payload: AddressCreate,
+    contact_id: int = CONTACT_ID,
+    db: Session = Depends(get_db),
+) -> Address:
+    """
+    Add an address to an existing contact.
+
+    A contact can have any number of addresses; `type` says which kind each one
+    is (`Home`, `Work`, or `Other`) and is the only required field.
+    """
+    contact = _get_or_404(db, contact_id)
+    return crud.create_address(db, contact, payload)
+
+
+@router.get(
+    "/{contact_id}/addresses",
+    response_model=list[AddressRead],
+    operation_id="listAddresses",
+    summary="List a contact's addresses",
+    response_description="The contact's addresses, ordered by type then id.",
+    responses={status.HTTP_404_NOT_FOUND: NOT_FOUND},
+)
+def list_addresses(
+    contact_id: int = CONTACT_ID,
+    db: Session = Depends(get_db),
+) -> list[Address]:
+    """List every address of a contact. Also embedded on the contact itself."""
+    contact = _get_or_404(db, contact_id)
+    return contact.addresses
+
+
+@router.put(
+    "/{contact_id}/addresses/{address_id}",
+    response_model=AddressRead,
+    operation_id="replaceAddress",
+    summary="Replace an address",
+    response_description="The address after replacement.",
+    responses={status.HTTP_404_NOT_FOUND: ADDRESS_NOT_FOUND},
+)
+def replace_address(
+    payload: AddressReplace,
+    contact_id: int = CONTACT_ID,
+    address_id: int = ADDRESS_ID,
+    db: Session = Depends(get_db),
+) -> Address:
+    """Replace every field of an address. Omitted optional fields are cleared."""
+    address = _get_address_or_404(db, contact_id, address_id)
+    return crud.replace_address(db, address, payload)
+
+
+@router.delete(
+    "/{contact_id}/addresses/{address_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="deleteAddress",
+    summary="Delete an address",
+    response_description="Deleted; the response has no body.",
+    responses={
+        status.HTTP_204_NO_CONTENT: {"description": "Deleted; the response has no body."},
+        status.HTTP_404_NOT_FOUND: ADDRESS_NOT_FOUND,
+    },
+)
+def delete_address(
+    contact_id: int = CONTACT_ID,
+    address_id: int = ADDRESS_ID,
+    db: Session = Depends(get_db),
+) -> Response:
+    """Permanently delete one address; the contact itself is untouched."""
+    address = _get_address_or_404(db, contact_id, address_id)
+    crud.delete_address(db, address)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

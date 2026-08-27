@@ -199,6 +199,95 @@ def test_put_with_photo_keeps_it(client, payload):
     assert response.json()["photo"] == PHOTO
 
 
+def _contact_with_address(client, payload, **address) -> tuple[int, dict]:
+    contact_id = client.post(BASE, json=payload).json()["id"]
+    response = client.post(f"{BASE}/{contact_id}/addresses", json={"type": "Home", **address})
+    assert response.status_code == 201
+    return contact_id, response.json()
+
+
+def test_create_address(client, payload):
+    contact_id, address = _contact_with_address(client, payload, street="1 Market St", city="San Francisco")
+    assert address["contact_id"] == contact_id
+    assert address["type"] == "Home"
+    assert address["city"] == "San Francisco"
+    assert address["state"] is None
+
+
+def test_address_types_match_between_schema_and_database():
+    # The allow-list lives in two places (Pydantic Literal, SQL CHECK); pin them together.
+    from typing import get_args
+
+    from app.models import ADDRESS_TYPES
+    from app.schemas import AddressType
+
+    assert get_args(AddressType) == ADDRESS_TYPES
+
+
+def test_address_requires_known_type(client, payload):
+    contact_id = client.post(BASE, json=payload).json()["id"]
+    response = client.post(f"{BASE}/{contact_id}/addresses", json={"type": "Vacation"})
+    assert response.status_code == 422
+
+
+def test_address_for_missing_contact_returns_404(client):
+    assert client.post(f"{BASE}/9999/addresses", json={"type": "Home"}).status_code == 404
+
+
+def test_contact_embeds_addresses_grouped_by_type(client, payload):
+    contact_id = client.post(BASE, json=payload).json()["id"]
+    for kind in ("Work", "Other", "Home", "Work"):
+        client.post(f"{BASE}/{contact_id}/addresses", json={"type": kind})
+
+    types = [a["type"] for a in client.get(f"{BASE}/{contact_id}").json()["addresses"]]
+    assert types == ["Home", "Other", "Work", "Work"]
+
+    listed = client.get(f"{BASE}/{contact_id}/addresses").json()
+    assert [a["type"] for a in listed] == types
+
+
+def test_list_contacts_includes_addresses(client, payload):
+    _contact_with_address(client, payload, city="London")
+    items = client.get(BASE).json()["items"]
+    assert items[0]["addresses"][0]["city"] == "London"
+
+
+def test_replace_address(client, payload):
+    contact_id, address = _contact_with_address(client, payload, street="Old St", city="London")
+    response = client.put(
+        f"{BASE}/{contact_id}/addresses/{address['id']}",
+        json={"type": "Work", "street": "New St"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["type"] == "Work"
+    assert body["street"] == "New St"
+    assert body["city"] is None  # omitted fields are cleared by PUT
+
+
+def test_delete_address(client, payload):
+    contact_id, address = _contact_with_address(client, payload)
+    url = f"{BASE}/{contact_id}/addresses/{address['id']}"
+    assert client.delete(url).status_code == 204
+    assert client.delete(url).status_code == 404
+    assert client.get(f"{BASE}/{contact_id}").json()["addresses"] == []
+
+
+def test_address_is_scoped_to_its_contact(client, payload):
+    _, address = _contact_with_address(client, payload)
+    other_id = client.post(BASE, json={**payload, "email": "other@example.com"}).json()["id"]
+    assert client.delete(f"{BASE}/{other_id}/addresses/{address['id']}").status_code == 404
+
+
+def test_deleting_contact_deletes_its_addresses(client, payload):
+    contact_id, address = _contact_with_address(client, payload)
+    assert client.delete(f"{BASE}/{contact_id}").status_code == 204
+    # A new contact must not inherit the orphaned row.
+    new_id = client.post(BASE, json={**payload, "email": "new@example.com"}).json()["id"]
+    assert client.get(f"{BASE}/{new_id}").json()["addresses"] == []
+    assert client.delete(f"{BASE}/{new_id}/addresses/{address['id']}").status_code == 404
+
+
 def test_put_omitting_photo_clears_it(client, payload):
     # PUT is a full replace: clients must carry the photo through an edit,
     # or it is wiped — the frontend edit form does exactly that.

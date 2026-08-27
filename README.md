@@ -110,7 +110,14 @@ also read):
 | `GET` | `/api/v1/contacts/{id}` | Fetch one contact |
 | `PUT` | `/api/v1/contacts/{id}` | Full replace (omitted fields are cleared) |
 | `PATCH` | `/api/v1/contacts/{id}` | Partial update (only sent fields change) |
-| `DELETE` | `/api/v1/contacts/{id}` | Delete → `204` |
+| `DELETE` | `/api/v1/contacts/{id}` | Delete → `204` (also deletes the contact's addresses) |
+| `POST` | `/api/v1/contacts/{id}/addresses` | Add a typed address (`Home`, `Work`, `Other`) → `201` |
+| `GET` | `/api/v1/contacts/{id}/addresses` | List the contact's addresses, ordered by type |
+| `PUT` | `/api/v1/contacts/{id}/addresses/{address_id}` | Full replace of one address |
+| `DELETE` | `/api/v1/contacts/{id}/addresses/{address_id}` | Delete one address → `204` |
+
+Every contact response also embeds its addresses as `addresses: [...]`, so the
+detail and list endpoints need no extra round trip.
 
 ### Contact fields
 

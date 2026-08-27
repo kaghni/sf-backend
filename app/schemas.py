@@ -2,8 +2,11 @@ import base64
 import binascii
 import re
 from datetime import datetime, timezone
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator
+
+AddressType = Literal["Home", "Work", "Other"]
 
 # Photos travel as data URIs so no file storage is needed. ~100 KB of image
 # data once base64-encoded — generous for an avatar, and it keeps list
@@ -184,6 +187,70 @@ class ContactUpdate(_ValidatesPhoto, BaseModel):
     )
 
 
+class AddressBase(BaseModel):
+    """Fields shared by every address request and response."""
+
+    type: AddressType = Field(
+        description="What kind of address this is: `Home`, `Work`, or `Other`.",
+        examples=["Home"],
+    )
+    street: str | None = Field(
+        default=None,
+        max_length=300,
+        description="Street address, including unit or suite.",
+        examples=["1 Market St, Suite 400"],
+    )
+    city: str | None = Field(default=None, max_length=120, description="City or locality.", examples=["San Francisco"])
+    state: str | None = Field(
+        default=None,
+        max_length=120,
+        description="State, province, or region.",
+        examples=["CA"],
+    )
+    postal_code: str | None = Field(
+        default=None,
+        max_length=20,
+        description="Postal or ZIP code.",
+        examples=["94105"],
+    )
+    country: str | None = Field(default=None, max_length=120, description="Country name.", examples=["USA"])
+
+
+_ADDRESS_EXAMPLE = {
+    "type": "Home",
+    "street": "1 Market St, Suite 400",
+    "city": "San Francisco",
+    "state": "CA",
+    "postal_code": "94105",
+    "country": "USA",
+}
+
+
+class AddressCreate(AddressBase):
+    """Body of `POST /api/v1/contacts/{contact_id}/addresses`. Only `type` is required."""
+
+    model_config = ConfigDict(json_schema_extra={"examples": [_ADDRESS_EXAMPLE]})
+
+
+class AddressReplace(AddressBase):
+    """
+    Body of `PUT /api/v1/contacts/{contact_id}/addresses/{address_id}`.
+
+    A full replacement: any optional field you omit is set back to `null`.
+    """
+
+    model_config = ConfigDict(json_schema_extra={"examples": [_ADDRESS_EXAMPLE]})
+
+
+class AddressRead(AddressBase):
+    """A stored address, as returned by every address endpoint."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int = Field(description="Server-assigned identifier.", examples=[1])
+    contact_id: int = Field(description="Id of the contact this address belongs to.", examples=[1])
+
+
 class ContactRead(ContactBase):
     """A stored contact, as returned by every contact endpoint."""
 
@@ -203,6 +270,10 @@ class ContactRead(ContactBase):
     )
 
     id: int = Field(description="Server-assigned identifier.", examples=[1])
+    addresses: list[AddressRead] = Field(
+        default_factory=list,
+        description="The contact's addresses, ordered by type then id.",
+    )
     created_at: datetime = Field(
         description="UTC timestamp of when the contact was created.",
         examples=["2026-08-19T16:22:58.189507Z"],
