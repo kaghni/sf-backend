@@ -1,6 +1,39 @@
+import base64
+import binascii
+import re
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator
+
+# Photos travel as data URIs so no file storage is needed. ~100 KB of image
+# data once base64-encoded — generous for an avatar, and it keeps list
+# responses bounded even at the maximum page size.
+PHOTO_MAX_LENGTH = 140_000
+_PHOTO_PREFIX = re.compile(r"^data:image/(png|jpeg|webp|gif);base64,")
+
+
+def _validate_photo_data_uri(value: str) -> str:
+    match = _PHOTO_PREFIX.match(value)
+    if match is None:
+        raise ValueError("photo must be a data:image/(png|jpeg|webp|gif);base64 data URI")
+    payload = value[match.end() :]
+    if not payload:
+        raise ValueError("photo payload is empty")
+    try:
+        base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("photo payload is not valid base64") from exc
+    return value
+
+
+class _ValidatesPhoto:
+    """Photo validation for the input models only — responses must not pay to
+    re-decode payloads that were already validated when they were stored."""
+
+    @field_validator("photo")
+    @classmethod
+    def _check_photo(cls, value: str | None) -> str | None:
+        return None if value is None else _validate_photo_data_uri(value)
 
 
 class ContactBase(BaseModel):
@@ -69,6 +102,16 @@ class ContactBase(BaseModel):
         description="Free-form notes about the contact. No length limit.",
         examples=["Met at the SF hackathon."],
     )
+    photo: str | None = Field(
+        default=None,
+        max_length=PHOTO_MAX_LENGTH,
+        description=(
+            "Profile photo as a base64 data URI "
+            "(`data:image/<png|jpeg|webp|gif>;base64,...`), at most "
+            "~100 KB encoded. Omit or send `null` for no photo."
+        ),
+        examples=["data:image/png;base64,iVBORw0KGgo..."],
+    )
 
 
 _FULL_EXAMPLE = {
@@ -88,13 +131,13 @@ _FULL_EXAMPLE = {
 _MINIMAL_EXAMPLE = {"first_name": "Grace", "last_name": "Hopper", "email": "grace@example.com"}
 
 
-class ContactCreate(ContactBase):
+class ContactCreate(_ValidatesPhoto, ContactBase):
     """Body of `POST /api/v1/contacts`. Only the two names and email are required."""
 
     model_config = ConfigDict(json_schema_extra={"examples": [_FULL_EXAMPLE, _MINIMAL_EXAMPLE]})
 
 
-class ContactReplace(ContactBase):
+class ContactReplace(_ValidatesPhoto, ContactBase):
     """
     Body of `PUT /api/v1/contacts/{contact_id}`.
 
@@ -105,7 +148,7 @@ class ContactReplace(ContactBase):
     model_config = ConfigDict(json_schema_extra={"examples": [_FULL_EXAMPLE]})
 
 
-class ContactUpdate(BaseModel):
+class ContactUpdate(_ValidatesPhoto, BaseModel):
     """
     Body of `PATCH /api/v1/contacts/{contact_id}`.
 
@@ -134,6 +177,11 @@ class ContactUpdate(BaseModel):
     postal_code: str | None = Field(default=None, max_length=20, description="New postal code.")
     country: str | None = Field(default=None, max_length=120, description="New country.")
     notes: str | None = Field(default=None, description="New notes; replaces the existing text.")
+    photo: str | None = Field(
+        default=None,
+        max_length=PHOTO_MAX_LENGTH,
+        description="New profile photo as a base64 data URI; `null` removes the photo.",
+    )
 
 
 class ContactRead(ContactBase):
