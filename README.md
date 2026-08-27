@@ -177,3 +177,7 @@ app/
   routers/contacts.py REST endpoints
 tests/                API tests via FastAPI TestClient
 ```
+
+## Fork note
+
+This fork is used for the Qodo "Roast My PR" meetup challenge (2026-08-26).
