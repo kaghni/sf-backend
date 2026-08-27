@@ -308,6 +308,68 @@ class ContactPage(BaseModel):
     offset: int = Field(description="Number of records skipped.", examples=[0])
 
 
+def _as_utc(value: datetime) -> datetime:
+    # SQLite discards tzinfo on write; the stored values are UTC, so label
+    # them as such rather than emitting an ambiguous naive timestamp.
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+class MeetupCreate(BaseModel):
+    """Body of `POST /api/v1/meetups`. Every field is required."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"title": "SF founders dinner", "city": "San Francisco", "starts_at": "2026-09-12T18:30:00Z"}]
+        }
+    )
+
+    title: str = Field(
+        min_length=1,
+        max_length=200,
+        description="What the meetup is called. Required, must not be blank.",
+        examples=["SF founders dinner"],
+    )
+    city: str = Field(
+        min_length=1,
+        max_length=120,
+        description="City the meetup happens in. Guests are the contacts with an address here, matched case-insensitively.",
+        examples=["San Francisco"],
+    )
+    starts_at: datetime = Field(
+        description="When the meetup starts, as an ISO 8601 timestamp. Stored in UTC.",
+        examples=["2026-09-12T18:30:00Z"],
+    )
+
+
+class MeetupRead(BaseModel):
+    """A stored meetup together with its derived guest list."""
+
+    id: int = Field(description="Server-assigned identifier.", examples=[1])
+    title: str = Field(description="What the meetup is called.", examples=["SF founders dinner"])
+    city: str = Field(description="City the meetup happens in.", examples=["San Francisco"])
+    starts_at: datetime = Field(description="UTC timestamp of when the meetup starts.", examples=["2026-09-12T18:30:00Z"])
+    created_at: datetime = Field(
+        description="UTC timestamp of when the meetup was created.",
+        examples=["2026-08-19T16:22:58.189507Z"],
+    )
+    guests: list[ContactRead] = Field(
+        description="Contacts with at least one address in the meetup's city, each listed once, ordered by id.",
+    )
+
+    @field_validator("starts_at", "created_at")
+    @classmethod
+    def _label_utc(cls, value: datetime) -> datetime:
+        return _as_utc(value)
+
+
+class NearbyCluster(BaseModel):
+    """A city where two or more contacts live — a candidate meetup."""
+
+    city: str = Field(description="City name as first spelled on an address.", examples=["San Francisco"])
+    contact_ids: list[int] = Field(description="Ids of the distinct contacts with an address in this city.", examples=[[1, 3]])
+    contact_count: int = Field(description="Number of distinct contacts in this city.", examples=[2])
+
+
 class HealthResponse(BaseModel):
     """Result of the liveness probe."""
 
@@ -325,6 +387,7 @@ class RootResponse(BaseModel):
     redoc: str = Field(description="Path to the ReDoc UI.", examples=["/redoc"])
     openapi: str = Field(description="Path to the OpenAPI 3.1 document.", examples=["/openapi.json"])
     contacts: str = Field(description="Base path of the contacts collection.", examples=["/api/v1/contacts"])
+    meetups: str = Field(description="Base path of the meetups collection.", examples=["/api/v1/meetups"])
     health: str = Field(description="Path to the liveness probe.", examples=["/health"])
 
 

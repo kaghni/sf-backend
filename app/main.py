@@ -11,7 +11,7 @@ from app import __version__
 from app.config import get_settings
 from app.crud import count_contacts
 from app.database import engine, get_db, init_db
-from app.routers import contacts
+from app.routers import contacts, meetups
 from app.schemas import HealthResponse, RootResponse
 from app.seed import seed_if_empty
 
@@ -48,6 +48,13 @@ TAGS_METADATA = [
         "description": (
             "Create, read, update, and delete contacts. Emails are unique across "
             "the collection, compared case-insensitively."
+        ),
+    },
+    {
+        "name": "meetups",
+        "description": (
+            "Gather contacts who live in the same city. A meetup's guest list is "
+            "derived from contact addresses, never stored."
         ),
     },
     {
@@ -89,6 +96,7 @@ app.add_middleware(
 )
 
 app.include_router(contacts.router)
+app.include_router(meetups.router)
 
 
 @app.get(
@@ -131,6 +139,7 @@ def root() -> RootResponse:
         redoc="/redoc",
         openapi="/openapi.json",
         contacts="/api/v1/contacts",
+        meetups="/api/v1/meetups",
         health="/health",
     )
 
