@@ -1,8 +1,8 @@
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from app.models import Contact
-from app.schemas import ContactCreate, ContactReplace, ContactUpdate
+from app.models import Address, Contact
+from app.schemas import AddressCreate, AddressReplace, ContactCreate, ContactReplace, ContactUpdate
 
 SORTABLE_FIELDS = ("id", "first_name", "last_name", "email", "company", "created_at", "updated_at")
 
@@ -34,7 +34,9 @@ def list_contacts(
     order: str = "asc",
 ) -> tuple[list[Contact], int]:
     """Return (page of contacts, total matching count)."""
-    stmt = select(Contact)
+    # Addresses ride along on every ContactRead; load them in one extra query
+    # per page rather than one per contact.
+    stmt = select(Contact).options(selectinload(Contact.addresses))
 
     if search:
         pattern = f"%{search.strip().lower()}%"
@@ -87,4 +89,29 @@ def update_contact(db: Session, contact: Contact, payload: ContactUpdate) -> Con
 
 def delete_contact(db: Session, contact: Contact) -> None:
     db.delete(contact)
+    db.commit()
+
+
+def get_address(db: Session, address_id: int) -> Address | None:
+    return db.get(Address, address_id)
+
+
+def create_address(db: Session, contact: Contact, payload: AddressCreate) -> Address:
+    address = Address(contact_id=contact.id, **payload.model_dump())
+    db.add(address)
+    db.commit()
+    db.refresh(address)
+    return address
+
+
+def replace_address(db: Session, address: Address, payload: AddressReplace) -> Address:
+    for field, value in payload.model_dump().items():
+        setattr(address, field, value)
+    db.commit()
+    db.refresh(address)
+    return address
+
+
+def delete_address(db: Session, address: Address) -> None:
+    db.delete(address)
     db.commit()
