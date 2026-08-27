@@ -214,6 +214,16 @@ def test_create_address(client, payload):
     assert address["state"] is None
 
 
+def test_address_types_match_between_schema_and_database():
+    # The allow-list lives in two places (Pydantic Literal, SQL CHECK); pin them together.
+    from typing import get_args
+
+    from app.models import ADDRESS_TYPES
+    from app.schemas import AddressType
+
+    assert get_args(AddressType) == ADDRESS_TYPES
+
+
 def test_address_requires_known_type(client, payload):
     contact_id = client.post(BASE, json=payload).json()["id"]
     response = client.post(f"{BASE}/{contact_id}/addresses", json={"type": "Vacation"})

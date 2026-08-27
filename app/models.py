@@ -68,7 +68,7 @@ class Address(Base):
     __tablename__ = "addresses"
     __table_args__ = (
         CheckConstraint(
-            "type IN ('Home', 'Work', 'Other')",
+            "type IN ({})".format(", ".join(f"'{kind}'" for kind in ADDRESS_TYPES)),
             name="ck_addresses_type",
         ),
     )
