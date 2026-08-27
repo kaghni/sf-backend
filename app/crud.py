@@ -171,7 +171,11 @@ def create_meetup(db: Session, payload: MeetupCreate) -> Meetup:
 
 def meetup_guests(db: Session, meetup: Meetup) -> list[Contact]:
     """Contacts with at least one address in the meetup's city, each once, by id."""
-    in_city = select(Address.contact_id).where(func.lower(Address.city) == _city_key(meetup.city))
+    # Same normalisation as list_nearby_clusters, so a city that shows up as
+    # "nearby" always yields its guests.
+    in_city = select(Address.contact_id).where(
+        func.lower(func.trim(Address.city)) == _city_key(meetup.city)
+    )
     stmt = (
         select(Contact)
         .where(Contact.id.in_(in_city))
