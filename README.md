@@ -75,6 +75,17 @@ CONTACTS_DATABASE_URL="sqlite+pysqlite:///./contacts.db" .venv/bin/python -m app
 
 The same code runs unchanged against Postgres (`postgresql+psycopg://...`).
 
+#### Upgrading a persistent database
+
+There is no migration tooling: startup only runs `create_all()`, which creates
+missing tables but never alters existing ones. When you upgrade a file-backed or
+Postgres database across a model change, apply the new columns by hand. For the
+contact photo column:
+
+```sql
+ALTER TABLE contacts ADD COLUMN photo TEXT;
+```
+
 ### Configuration
 
 All settings are environment variables prefixed with `CONTACTS_` (a `.env` file is
